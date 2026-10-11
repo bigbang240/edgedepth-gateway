@@ -4,7 +4,7 @@ package hub_test
 // encodes one way and the terminal decodes another. Proto3 does not reject a
 // mismatch, so these never surface as an error, only as a blank panel minutes
 // later. Every assertion below decodes the frame EXACTLY as
-// c-based-trader-client/src/core/message_handler.cpp does, because matching
+// edgedepth-terminal/src/core/message_handler.cpp does, because matching
 // the gateway's own idea of what it sent is what let the bug ship.
 //
 // No network: a stub venue stands in for Binance, so this runs in CI where the

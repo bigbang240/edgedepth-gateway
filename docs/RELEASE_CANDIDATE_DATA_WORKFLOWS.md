@@ -1,15 +1,12 @@
-# Gateway data-workflow release candidate
+# Gateway data-workflow changes (historical)
 
-Unreleased local changes, 8 September 2026. No version tag or image publication
-is implied.
+The 8 September 2026 candidate is no longer pending. It shipped in commit
+`b822284` and is in the GHCR images from `sha-b822284` onward, including
+`latest`. The older `0.1.0` image predates it.
 
 - Route Binance market and depth streams through their current separate endpoints.
 - Retain bounded closed-minute per-price observations and answer existing footprint/profile requests.
 - Reset partial trade history across detected gaps; repair depth resync retry and stale-snapshot handling.
 - Bound queued bytes and active symbols, and require continuity reporting for adapter history.
 
-Before announcing: publish reviewed terminal and gateway revisions, pin both
-image digests, and rerun the cold-start, file, live and pack-replay checks against
-those published images. The repos version independently. Keep the previous
-digests for rollback. Do not claim Windows, macOS, Safari, all venues, a fixed
-FPS figure, historical completeness, or broker execution from this Linux test.
+Current behaviour and limits are in the [README](../README.md#observed-volume-history).

@@ -14,14 +14,14 @@ Binance public streams  ->  edgedepth-gateway  ->  ws://localhost:8080/ws  ->  t
 
 ## Quick start
 
+The fastest way to see it working is the terminal's
+[Docker quick start](https://github.com/edgedepthhq/edgedepth-terminal#run-it-locally),
+which runs this gateway beside a local terminal. No account needed.
+
+To run the gateway on its own:
+
 ```bash
 docker compose up
-```
-
-Then open the terminal against it:
-
-```
-https://app.edgedepth.com/terminal/btcusdt?ws=ws://localhost:8080/ws
 ```
 
 Or without Docker:
@@ -30,10 +30,20 @@ Or without Docker:
 go build ./cmd/edgedepth-gateway && ./edgedepth-gateway
 ```
 
+Then point a terminal at `ws://localhost:8080/ws`: a
+[local terminal build](https://github.com/edgedepthhq/edgedepth-terminal/blob/master/docs/SETUP.md#build-from-source)
+with `?ws=ws://localhost:8080/ws`, or the hosted terminal (free EdgeDepth account
+required) at `https://app.edgedepth.com/terminal/btcusdt?ws=ws://localhost:8080/ws`.
+
 If your browser refuses the insecure WebSocket from a hosted HTTPS page, run
 the terminal locally instead and point it at the same URL. Browsers treat
 `localhost` as a trustworthy origin, so this usually just works, but the local
 terminal is the guaranteed path.
+
+The gateway connects from your machine to Binance's public futures endpoints,
+and Binance may be unavailable in some regions. If panels stay empty, check the
+gateway log for repeated `could not load symbol list` or
+`binance stream dropped, reconnecting` warnings.
 
 ## What you get
 
@@ -52,7 +62,7 @@ Everything here is computed from Binance's free public data. No key, no tier.
 | Historical backfill (1m and above) | yes | Binance REST klines |
 | VPIN, positioning, modelled liq heatmap | no | hosted backend only |
 | Patterns, scanner scores, contagion | no | hosted backend only |
-| VPVR / footprint history | bounded | local candidate: closed observed minutes after warmup, up to 60 minutes / 50,000 price-minute cells per active symbol |
+| VPVR / footprint history | bounded | closed observed minutes after warmup, up to 60 minutes / 50,000 price-minute cells per active symbol |
 | TPO | candle approximation | terminal builds 30m blocks from available candle ranges |
 
 Sub-minute candles are accumulated from individual trades as they arrive. The
@@ -60,10 +70,10 @@ building candle therefore moves trade by trade instead of waiting for a closed
 bar. The terminal renders them because its entitlements default to Pro when no
 host globals are present.
 
-## Observed volume history (local candidate)
+## Observed volume history
 
-These changes are not yet published in release images. Build this checkout to
-try them. A fresh subscription has no stored trade history: aggregation starts
+Published in GHCR images from `sha-b822284` onward, including `latest`; the
+older `0.1.0` image predates it. A fresh subscription has no stored trade history: aggregation starts
 at the next minute boundary, and the first trade in a later minute closes it.
 Expect roughly one to two minutes of warmup on an active market, longer on a
 quiet one. No trades is not proof of a complete empty minute.
@@ -117,7 +127,7 @@ use `/market/stream`; depth uses a separate `/public/stream` connection. The
 base override is the host root (for example `wss://fstream.binance.com`), without
 a route suffix. Legacy combined endpoints can leave the book moving while the
 tape is empty. Check the image revision and logs before trying an override.
-The default `aggTrade` route was tested live for this candidate. `trade` remains
+The default `aggTrade` route was tested live. `trade` remains
 an experimental compatibility option, not a promise of availability.
 
 The all-market `!ticker@arr` stream is blocked on some of the same networks,
@@ -176,7 +186,7 @@ wrong number, usually minutes later.
 
 `internal/hub/wire_shape_test.go` needs no network. A stub venue drives a trade
 through the real subscribe, aggregate, flush and encode path, and every frame is
-then decoded the way `c-based-trader-client` decodes it rather than the way this
+then decoded the way the [terminal](https://github.com/edgedepthhq/edgedepth-terminal) decodes it rather than the way this
 gateway encoded it. That distinction is the whole point: live candles went out
 wrapped in the plural `Candles` while the terminal parsed a singular `Candle`,
 and because proto3 skips mismatched fields as unknown, the parse succeeded and
