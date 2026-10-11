@@ -1,7 +1,7 @@
 services:
   gateway:
     build: .
-    image: edgedepthhq/edgedepth-gateway:latest
+    image: ghcr.io/edgedepthhq/edgedepth-gateway:latest
     container_name: edgedepth-gateway
     ports:
       - "8080:8080"
