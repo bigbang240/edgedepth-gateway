@@ -1,0 +1,13 @@
+{
+    "name": "edgedepth-rt-egress",
+    "version": "0.1.0",
+    "description": "JSON WebSocket bridge in front of the EdgeDepth gateway's protobuf wire - feeds your own terminal/bot/dashboard with trades, orderbook, liquidations and 24h tickers.",
+    "type": "module",
+    "scripts": {
+        "dev": "bun run index.ts",
+        "start": "bun run index.ts"
+    },
+    "dependencies": {
+        "protobufjs": "^7.4.0"
+    }
+}
