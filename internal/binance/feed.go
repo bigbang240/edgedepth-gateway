@@ -212,9 +212,16 @@ func (f *Feed) Run(ctx context.Context) {
 
 func (f *Feed) onMessage(env Envelope) {
         // The stream name is "<symbol>@<type>" or "<symbol>@depth@100ms".
+        // The partial-book streams (@depth5/10/20@100ms) MUST match before the
+        // generic @depth case: their frames are complete top-of-book anchors,
+        // not sequence diffs, and onDepth would buffer or drop them forever -
+        // which is exactly what silently disabled the ban-window anchor.
         switch {
         case hasSuffix(env.Stream, "@aggTrade"), hasSuffix(env.Stream, "@trade"):
                 f.onAggTrade(env.Data)
+        case contains(env.Stream, "@depth20@100ms"), contains(env.Stream, "@depth10@100ms"),
+                contains(env.Stream, "@depth5@100ms"):
+                f.onPartialDepth(env.Data)
         case contains(env.Stream, "@depth"):
                 f.onDepth(env.Data)
         case contains(env.Stream, "@markPrice"):
