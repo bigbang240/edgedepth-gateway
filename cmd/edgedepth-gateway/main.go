@@ -23,6 +23,7 @@ import (
 
 	"github.com/edgedepthhq/edgedepth-gateway/internal/binance"
 	"github.com/edgedepthhq/edgedepth-gateway/internal/hub"
+	"github.com/edgedepthhq/edgedepth-gateway/internal/okx"
 )
 
 func main() {
@@ -35,6 +36,7 @@ func main() {
 		tradeSt = flag.String("trade-stream", envOr("BINANCE_TRADE_STREAM", "aggTrade"),
 			"Binance trade stream: aggTrade (aggregated per taker order) or trade (raw per fill). "+
 				"Switch to trade if the tape stays empty while the orderbook updates.")
+		okxBase = flag.String("okx-base", envOr("OKX_BASE", ""), "override OKX host (REST and WS share the host)")
 	)
 	flag.Parse()
 
@@ -54,6 +56,10 @@ func main() {
 	if *wsURL != "" {
 		binance.WSBase = strings.TrimSuffix(*wsURL, "/")
 	}
+	if *okxBase != "" {
+		okx.RESTBase = strings.TrimSuffix(*okxBase, "/")
+		okx.WSBase = strings.TrimSuffix(*okxBase, "/")
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(),
 		syscall.SIGINT, syscall.SIGTERM)
@@ -61,7 +67,7 @@ func main() {
 
 	// The venue registry. Adding an exchange is one adapter package plus one
 	// entry here; see CONTRIBUTING.md.
-	h := hub.New(log, binance.New(log))
+	h := hub.New(log, binance.New(log), okx.New(log))
 
 	// The symbol whitelist is a nicety, not a requirement: without it the
 	// gateway still runs and the venue rejects bad symbols itself.
