@@ -218,17 +218,35 @@ func (f *Feed) onBooks(action string, raw json.RawMessage) {
 	last := f.lastTrade
 	f.mu.Unlock()
 
+	// TEMP breadcrumb (phase6 bring-up): the maintained map must never cross.
+	if len(bids) > 0 && len(asks) > 0 && asks[0].Price <= bids[0].Price {
+		f.log.Warn("gateway book crossed",
+			"bid", bids[0].Price, "ask", asks[0].Price,
+			"action", action, "seq", seq, "prev", prev,
+			"frameBids", len(d.Bids), "frameAsks", len(d.Asks),
+			"mapBids", len(bids), "mapAsks", len(asks),
+			"topBidLevel", d.Bids[0], "topAskLevel", d.Asks[0])
+	}
+
 	if wasNew && action == "snapshot" {
 		f.log.Info("orderbook synced", "levels", len(bids)+len(asks))
 	}
 
 	f.emit(pb.Stream_STREAM_ORDERBOOK, 0, ts, &pb.BookUpdate{
-		TimestampMs:      ts,
-		Asks:             asks,
-		Bids:             bids,
-		Snapshot:         snapshot,
-		LastPrice:        last,
+		TimestampMs: ts,
+		Asks:        asks,
+		Bids:        bids,
+		Snapshot:    snapshot,
+		LastPrice:   last,
+		// FirstUpdateId carries seq (the diff's own id), mirroring Binance's
+		// U-range start. The client's bridge rule then admits ONLY the exact
+		// next event after a re-primed snapshot (seq == snapshotSeq+1) and
+		// honestly rejects anything older: admitting stale in-flight diffs
+		// (FirstUpdateId=prevSeqId did) lets a diff predating the snapshot
+		// cross the freshly re-anchored book, which re-triggered the very
+		// refresh that caused the re-prime — a self-sustaining recovering loop.
 		LastUpdateId:     seq,
+		FirstUpdateId:    seq,
 		PreviousUpdateId: prev,
 	})
 }
