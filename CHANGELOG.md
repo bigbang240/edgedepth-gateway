@@ -3,7 +3,9 @@
 قالب: [Keep a Changelog](https://keepachangelog.com) · نسخه‌بندی: [SemVer](https://semver.org)
 گیت‌وی Go چند-صرافی (بایننس USDⓈ-M + OKX SWAP) پشت ترمینال WASM.
 
-## [Unreleased] — فاز ۸ «پایداری و توزیع» (در جریان)
+## [Unreleased] — بستن باگ تیکر OKX (تکمیل فاز ۶)
+### Fixed
+- تیکر سراسری OKX روی یک فریم کامل می‌شکست: قراردادهای تازه‌لیست‌شده/pre-market (مثل MP-USDT-SWAP) در `last`/`open24h`/`vol` رشتهٔ خالی `""` می‌فرستند و unmarshal سخت‌گیرِ `json.Number` کل فریم tickers را رد می‌کرد → یونیورس watchlist OKX صفر می‌شد؛ نوع tolerant `flexNum` (پذیرش `""`/`null`/عدد نامعتبر به‌صورت صفر) + عمومی‌سازی `numF`/`numI` روی `~string` در `internal/okx/rest.go` — پول ۳۰s حالا ۵۲۴ نماد را پایدار سرو می‌کند
 ### Added
 - فعال‌سازی GitHub Actions روی fork + `workflow_dispatch` برای اجرای دستی
 - این CHANGELOG

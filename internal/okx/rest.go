@@ -147,12 +147,12 @@ func Instruments(ctx context.Context, instID string) ([]instrument, error) {
 // ─── 24h tickers ─────────────────────────────────────────────────────────────
 
 type tickerJSON struct {
-	InstID    string      `json:"instId"`
-	Last      json.Number `json:"last"`
-	Open24h   json.Number `json:"open24h"`
-	VolCcy24h json.Number `json:"volCcy24h"`
-	Vol24h    json.Number `json:"vol24h"`
-	Ts        json.Number `json:"ts"`
+	InstID    string  `json:"instId"`
+	Last      flexNum `json:"last"`
+	Open24h   flexNum `json:"open24h"`
+	VolCcy24h flexNum `json:"volCcy24h"`
+	Vol24h    flexNum `json:"vol24h"`
+	Ts        flexNum `json:"ts"`
 }
 
 // Tickers24h polls the all-SWAP 24h ticker snapshot. OKX has no all-market
@@ -310,29 +310,57 @@ func Candles(ctx context.Context, instID, bar string, count int, endTimeMs int64
 
 // ─── shared helpers ──────────────────────────────────────────────────────────
 
-// numF parses a json.Number tolerantly: OKX mixes string and number scalars
-// across endpoints, and a zero from a failed parse would silently multiply
-// every contract size into nothing.
-func numF(n json.Number) float64 {
-	if n == "" {
-		return 0
+// flexNum is a json.Number that tolerates OKX's empty-string / null numerics.
+// The all-market tickers frame spans every SWAP instrument, including freshly
+// listed and pre-open contracts whose last/open24h/vol fields arrive as ""
+// (or null). A strict json.Number unmarshal rejected the ENTIRE frame for one
+// such row, so the OKX watchlist universe collapsed to zero symbols (phase 6
+// close). The tolerant type keeps the json.Number surface numF/numI consume:
+// an unparseable value decodes as empty and numF/numI map that to 0.
+type flexNum json.Number
+
+func (f *flexNum) UnmarshalJSON(b []byte) error {
+	s := string(b)
+	if s == `""` || s == "null" || s == "" {
+		*f = ""
+		return nil
 	}
-	v, err := n.Float64()
-	if err != nil {
-		return 0
+	n := json.Number(s)
+	if _, err := n.Float64(); err != nil {
+		// Not a parseable number despite the wire encoding; keep the frame.
+		*f = ""
+		return nil
 	}
-	return v
+	*f = flexNum(n)
+	return nil
 }
 
-func numI(n json.Number) int64 {
-	if n == "" {
+// numF parses a json.Number tolerantly: OKX mixes string and number scalars
+// across endpoints, and a zero from a failed parse would silently multiply
+// every contract size into nothing. Generic over ~string so the tolerant
+// flexNum fields (tickerJSON) decode through the same path.
+func numF[T ~string](n T) float64 {
+	v := json.Number(n)
+	if v == "" {
 		return 0
 	}
-	v, err := n.Int64()
+	f, err := v.Float64()
 	if err != nil {
 		return 0
 	}
-	return v
+	return f
+}
+
+func numI[T ~string](n T) int64 {
+	v := json.Number(n)
+	if v == "" {
+		return 0
+	}
+	i, err := v.Int64()
+	if err != nil {
+		return 0
+	}
+	return i
 }
 
 // strF parses an optional string scalar ("12.5"); empty/absent → 0.
