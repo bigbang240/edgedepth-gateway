@@ -36,7 +36,11 @@ func main() {
 		tradeSt = flag.String("trade-stream", envOr("BINANCE_TRADE_STREAM", "aggTrade"),
 			"Binance trade stream: aggTrade (aggregated per taker order) or trade (raw per fill). "+
 				"Switch to trade if the tape stays empty while the orderbook updates.")
-		okxBase = flag.String("okx-base", envOr("OKX_BASE", ""), "override OKX host (REST and WS share the host)")
+		okxBase  = flag.String("okx-base", envOr("OKX_BASE", ""), "override OKX host (REST and WS share the host)")
+		spotRest = flag.String("binance-spot-rest", envOr("BINANCE_SPOT_REST", ""),
+			"override Binance spot REST base URL (spot ticker seed for the terminal's Spot-Perp basis layer)")
+		spotWS = flag.String("binance-spot-ws", envOr("BINANCE_SPOT_WS", ""),
+			"override Binance spot stream base URL")
 	)
 	flag.Parse()
 
@@ -60,14 +64,21 @@ func main() {
 		okx.RESTBase = strings.TrimSuffix(*okxBase, "/")
 		okx.WSBase = strings.TrimSuffix(*okxBase, "/")
 	}
+	if *spotRest != "" {
+		binance.SpotRESTBase = strings.TrimSuffix(*spotRest, "/")
+	}
+	if *spotWS != "" {
+		binance.SpotWSBase = strings.TrimSuffix(*spotWS, "/")
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(),
 		syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	// The venue registry. Adding an exchange is one adapter package plus one
-	// entry here; see CONTRIBUTING.md.
-	h := hub.New(log, binance.New(log), okx.New(log))
+	// entry here; see CONTRIBUTING.md. binance.Spot is the ticker-only spot
+	// adapter: it seeds the terminal's Spot-Perp basis layer and nothing else.
+	h := hub.New(log, binance.New(log), okx.New(log), binance.NewSpot(log))
 
 	// The symbol whitelist is a nicety, not a requirement: without it the
 	// gateway still runs and the venue rejects bad symbols itself.

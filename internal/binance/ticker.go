@@ -27,9 +27,21 @@ type tickerEntry struct {
 // Binance pushes !ticker@arr once per second carrying every symbol, which is
 // roughly 150KB/s. The terminal wants exactly that for its watchlist and
 // status bar, so it is forwarded whole rather than filtered per subscriber.
+//
+// The feed is host-bound: futures uses the package globals, the spot variant
+// (NewSpotTickerFeed) binds spot's stream host with the identical !ticker@arr
+// schema and a lighter REST fallback (price-only, weight 4 - see SpotPrices:
+// the heavy all-market 24h endpoint is the first thing a busy IP gets banned
+// from, and the basis layer only needs last price).
 type TickerFeed struct {
 	log  *slog.Logger
 	emit func(*pb.Ticker24HUpdate)
+
+	// Host binding: wsBase+route build the combined-stream URL; restPoll is
+	// the REST fallback poll. Futures defaults are set by NewTickerFeed.
+	wsBase   string
+	route    string
+	restPoll func(ctx context.Context) ([]Ticker24h, error)
 
 	// frames counts stream pushes, so the REST fallback can tell "the socket
 	// is working" from "the socket connected and delivered nothing".
@@ -42,15 +54,34 @@ type TickerFeed struct {
 // TradeStream, so a test does not have to wait 30 seconds.
 var tickerPollInterval = 30 * time.Second
 
-// NewTickerFeed creates the global ticker feed.
+// NewTickerFeed creates the global ticker feed for Binance USD-M futures.
 func NewTickerFeed(log *slog.Logger, emit func(*pb.Ticker24HUpdate)) *TickerFeed {
-	return &TickerFeed{log: log.With("feed", "ticker24h"), emit: emit}
+	return newTickerFeedAt(WSBase, "/market", func(ctx context.Context) ([]Ticker24h, error) {
+		return tickers24hAt(ctx, RESTBase, "/fapi/v1/ticker/24hr")
+	}, log, emit)
+}
+
+// NewSpotTickerFeed creates the global ticker feed for Binance spot. The
+// stream host is stream.binance.com:9443 with no "/market" prefix, and the
+// REST fallback is the price-only /api/v3/ticker/price (weight 4).
+func NewSpotTickerFeed(log *slog.Logger, emit func(*pb.Ticker24HUpdate)) *TickerFeed {
+	return newTickerFeedAt(SpotWSBase, "", SpotPrices, log, emit)
+}
+
+func newTickerFeedAt(wsBase, route string, restPoll func(context.Context) ([]Ticker24h, error), log *slog.Logger, emit func(*pb.Ticker24HUpdate)) *TickerFeed {
+	return &TickerFeed{
+		log:      log.With("feed", "ticker24h"),
+		emit:     emit,
+		wsBase:   wsBase,
+		route:    route,
+		restPoll: restPoll,
+	}
 }
 
 // Run blocks until ctx is cancelled.
 func (t *TickerFeed) Run(ctx context.Context) {
 	go t.pollREST(ctx)
-	s := NewStream([]string{"!ticker@arr"}, t.log, t.onMessage, nil)
+	s := NewStreamAt(t.wsBase, t.route, []string{"!ticker@arr"}, t.log, t.onMessage, nil)
 	s.Run(ctx)
 }
 
@@ -72,7 +103,7 @@ func (t *TickerFeed) pollREST(ctx context.Context) {
 
 	for n := 0; ; n++ {
 		if t.frames.Load() == 0 {
-			arr, err := Tickers24h(ctx)
+			arr, err := t.restPoll(ctx)
 			switch {
 			case err != nil:
 				if ctx.Err() == nil {

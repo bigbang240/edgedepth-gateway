@@ -29,6 +29,7 @@ type Envelope struct {
 // It reconnects with jittered exponential backoff and, because Binance drops
 // every connection at the 24 hour mark, treats a clean close as routine.
 type Stream struct {
+	base    string
 	names   []string
 	route   string
 	onMsg   func(Envelope)
@@ -46,7 +47,15 @@ func NewStream(names []string, log *slog.Logger, onMsg func(Envelope), onReset f
 	if len(names) > 0 && (strings.Contains(names[0], "@depth") || strings.Contains(names[0], "bookTicker")) {
 		route = "/public"
 	}
-	return &Stream{names: names, route: route, onMsg: onMsg, onReset: onReset, log: log}
+	return &Stream{base: WSBase, names: names, route: route, onMsg: onMsg, onReset: onReset, log: log}
+}
+
+// NewStreamAt is NewStream with an explicit host and URL route, for the
+// adapter variants that share the futures transport shapes but live on a
+// different Binance host (spot's combined-stream path is "/stream" with no
+// "/market" prefix; the futures one is "/market/stream").
+func NewStreamAt(base, route string, names []string, log *slog.Logger, onMsg func(Envelope), onReset func()) *Stream {
+	return &Stream{base: base, names: names, route: route, onMsg: onMsg, onReset: onReset, log: log}
 }
 
 // Run blocks until ctx is cancelled, keeping the connection alive throughout.
@@ -86,7 +95,7 @@ func (s *Stream) dial(ctx context.Context) error {
 	// them and unescaping afterwards is how "!ticker@arr" silently became
 	// "%21ticker@arr" and returned a connection that never delivered a frame.
 	// Join them verbatim instead.
-	u := WSBase + s.route + "/stream?streams=" + strings.Join(s.names, "/")
+	u := s.base + s.route + "/stream?streams=" + strings.Join(s.names, "/")
 
 	dialCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()

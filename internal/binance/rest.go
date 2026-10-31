@@ -102,13 +102,39 @@ func (g *restGate) success() {
 	g.wait = 0
 }
 
-var restGateGate restGate
+// restGates holds one cooldown gate per REST host. The futures proxy and the
+// spot API are different hosts that ban independently (different weights,
+// different endpoints), so a 418 from one must not starve the other: without
+// per-host gates, one boot-time spot exchangeInfo ban would put the futures
+// depth snapshots into cooldown too, and vice versa.
+var restGates sync.Map // host -> *restGate
+
+func gateFor(base string) *restGate {
+	host := base
+	if u, err := url.Parse(base); err == nil && u.Host != "" {
+		host = u.Host
+	}
+	if g, ok := restGates.Load(host); ok {
+		return g.(*restGate)
+	}
+	g, _ := restGates.LoadOrStore(host, &restGate{})
+	return g.(*restGate)
+}
 
 func getJSON(ctx context.Context, path string, q url.Values, out any) error {
-	if err := restGateGate.check(); err != nil {
+	return getJSONAt(ctx, RESTBase, path, q, out)
+}
+
+// getJSONAt is getJSON against an explicit host, for the adapter variants
+// that share the futures REST shapes but live on a different Binance host
+// (spot: api.binance.com, futures: fapi.binance.com). Each host gets its own
+// cooldown gate; same retry policy.
+func getJSONAt(ctx context.Context, base, path string, q url.Values, out any) error {
+	gate := gateFor(base)
+	if err := gate.check(); err != nil {
 		return err
 	}
-	u := RESTBase + path
+	u := base + path
 	if len(q) > 0 {
 		u += "?" + q.Encode()
 	}
@@ -142,13 +168,13 @@ func getJSON(ctx context.Context, path string, q url.Values, out any) error {
 			}
 		}
 		if err = do(); err == nil {
-			restGateGate.success()
+			gate.success()
 			return nil
 		}
 		var se *statusError
 		if errors.As(err, &se) {
 			if se.code == http.StatusTeapot || se.code == http.StatusTooManyRequests {
-				restGateGate.trip()
+				gate.trip()
 			}
 			return err
 		}
@@ -354,6 +380,13 @@ type Ticker24h struct {
 // has no last price and no 24h change for any row. Binance weights the
 // no-symbol form at 40, so a 30s poll is comfortable against 2400/min.
 func Tickers24h(ctx context.Context) ([]Ticker24h, error) {
+	return tickers24hAt(ctx, RESTBase, "/fapi/v1/ticker/24hr")
+}
+
+// tickers24hAt is Tickers24h against an explicit host and path. The spot
+// endpoint (/api/v3/ticker/24hr) returns the same array shape, so one parser
+// serves both.
+func tickers24hAt(ctx context.Context, base, path string) ([]Ticker24h, error) {
 	var out []struct {
 		Symbol string `json:"symbol"`
 		// priceChangePercent, not priceChange: the terminal renders this as a
@@ -363,7 +396,7 @@ func Tickers24h(ctx context.Context) ([]Ticker24h, error) {
 		QuoteVol  string `json:"quoteVolume"`
 		CloseTime int64  `json:"closeTime"`
 	}
-	if err := getJSON(ctx, "/fapi/v1/ticker/24hr", nil, &out); err != nil {
+	if err := getJSONAt(ctx, base, path, nil, &out); err != nil {
 		return nil, err
 	}
 	res := make([]Ticker24h, 0, len(out))
@@ -379,16 +412,48 @@ func Tickers24h(ctx context.Context) ([]Ticker24h, error) {
 	return res, nil
 }
 
+// SpotPrices fetches every spot symbol's last price via /api/v3/ticker/price
+// (weight 4) instead of /api/v3/ticker/24hr (weight 80): the Spot-Perp basis
+// layer only needs last price, and the light endpoint keeps answering on IPs
+// where the heavy all-market ticker is rate-banned. Change/volume stay zero -
+// the binancespot venue feeds the basis strip, nothing else reads it.
+func SpotPrices(ctx context.Context) ([]Ticker24h, error) {
+	var out []struct {
+		Symbol string `json:"symbol"`
+		Price  string `json:"price"`
+	}
+	if err := getJSONAt(ctx, SpotRESTBase, "/api/v3/ticker/price", nil, &out); err != nil {
+		return nil, err
+	}
+	now := time.Now().UnixMilli()
+	res := make([]Ticker24h, 0, len(out))
+	for _, e := range out {
+		res = append(res, Ticker24h{
+			Symbol:      e.Symbol,
+			LastPrice:   parseF(e.Price),
+			EventTimeMs: now,
+		})
+	}
+	return res, nil
+}
+
 // ExchangeSymbols returns the tradable USD-M perpetual symbols, lowercased.
 // Used to validate what a client asks for before opening an upstream socket.
 func ExchangeSymbols(ctx context.Context) (map[string]bool, error) {
+	return exchangeSymbolsAt(ctx, RESTBase, "/fapi/v1/exchangeInfo")
+}
+
+// exchangeSymbolsAt parses an exchangeInfo whitelist from an explicit host.
+// The spot and futures exchangeInfo responses both carry a top-level
+// "symbols" array of {symbol,status} objects, so one parser serves both.
+func exchangeSymbolsAt(ctx context.Context, base, path string) (map[string]bool, error) {
 	var out struct {
 		Symbols []struct {
 			Symbol string `json:"symbol"`
 			Status string `json:"status"`
 		} `json:"symbols"`
 	}
-	if err := getJSON(ctx, "/fapi/v1/exchangeInfo", nil, &out); err != nil {
+	if err := getJSONAt(ctx, base, path, nil, &out); err != nil {
 		return nil, err
 	}
 	set := make(map[string]bool, len(out.Symbols))

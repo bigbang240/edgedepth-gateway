@@ -78,3 +78,62 @@ func (b *Binance) HistoricalCandles(ctx context.Context, symbol string, tfSec in
 	}
 	return out, nil
 }
+
+// SpotRESTBase and SpotWSBase are the Binance spot hosts. Overridable like
+// the futures ones (see cmd/edgedepth-gateway) for region mirrors or tests.
+var (
+	SpotRESTBase = "https://api.binance.com"
+	SpotWSBase   = "wss://stream.binance.com:9443"
+)
+
+// Spot is the ticker-only exchange.Exchange adapter for Binance spot,
+// registered as "binancespot". It exists to seed the terminal's Spot-Perp
+// basis layer: the global 24h ticker (same !ticker@arr schema as futures,
+// one push per second) is enough for that, so there is deliberately no
+// depth/trade feed behind it - the terminal never chart-subscribes this
+// venue, and a stray subscription just gets an idle feed that never syncs.
+type Spot struct {
+	log *slog.Logger
+}
+
+// NewSpot creates the adapter.
+func NewSpot(log *slog.Logger) *Spot {
+	return &Spot{log: log}
+}
+
+// ID is "binancespot": the venue string the terminal keys the spot ticker
+// subscription with. Distinct from "binancef" so TickerManager can hold both.
+func (s *Spot) ID() string { return "binancespot" }
+
+// Symbols returns the spot exchangeInfo whitelist. The spot response shares
+// the futures parser shape ({symbol,status}), so one helper serves both.
+func (s *Spot) Symbols(ctx context.Context) (map[string]bool, error) {
+	return exchangeSymbolsAt(ctx, SpotRESTBase, "/api/v3/exchangeInfo")
+}
+
+// NewFeed returns an idle placeholder: the terminal never subscribes spot
+// depth, and returning a feed that never syncs beats a nil that would panic
+// the hub if a stray subscription ever arrived.
+func (s *Spot) NewFeed(symbol string, emit exchange.Emit) exchange.Feed {
+	return idleFeed{}
+}
+
+// GlobalTicker streams the spot !ticker@arr feed, one push per second.
+func (s *Spot) GlobalTicker(emit exchange.Emit) exchange.Runner {
+	return NewSpotTickerFeed(s.log, func(u *pb.Ticker24HUpdate) {
+		emit(pb.Stream_STREAM_TICKER24H, 0, u.TimestampMs, u)
+	})
+}
+
+// HistoricalCandles: no klines on this adapter - the venue exists for the
+// basis layer, not for charts. The hub answers with an empty batch.
+func (s *Spot) HistoricalCandles(context.Context, string, int64, int, int64) ([]*pb.Candle, error) {
+	return nil, exchange.ErrUnsupported
+}
+
+// idleFeed is the placeholder Feed behind the ticker-only venue.
+type idleFeed struct{}
+
+func (idleFeed) Run(ctx context.Context)                       { <-ctx.Done() }
+func (idleFeed) Snapshot() *pb.BookUpdate                      { return nil }
+func (idleFeed) MarkState() (float64, float64, float64, int64) { return 0, 0, 0, 0 }
